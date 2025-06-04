@@ -661,7 +661,7 @@ router.post("/create-paid-checkout-session", async (req, res) => {
         },
       ],
       mode: "subscription",
-      success_url: `http://127.0.0.1:5500/test/paymentSuccess.html?stripeCustomerId=${customer.id}&product_id=${product_id}&quantity=${quantity}`,
+      success_url: `ttps://clinquant-naiad-5a8fed.netlify.app/paymentSuccess.html?stripeCustomerId=${customer.id}&product_id=${product_id}&quantity=${quantity}`,
       cancel_url: "https://clinquant-naiad-5a8fed.netlify.app/test.html",
       metadata: {
         email,
