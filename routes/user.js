@@ -302,24 +302,27 @@ function generateFreeTrialKey() {
 
 router.post("/register", async (req, res) => {
   try {
-    const { email, product_id } = req.body;
-    if (!email || !product_id) {
-      return res
-        .status(400)
-        .json({ error: "Email and product_id are required" });
+    const { email, product_id, firstName, lastName } = req.body;
+
+    // Validate required fields
+    if (!email || !product_id || !firstName || !lastName) {
+      return res.status(400).json({
+        error: "firstName, lastName, email and product_id are required",
+      });
     }
 
-    // 1. Get all prices for the product from Stripe
+    // 1. Get prices for the product
     const prices = await stripe.prices.list({
       product: product_id,
       active: true,
     });
+
     if (!prices.data.length) {
-      return res
-        .status(400)
-        .json({ error: "No active price found for this product_id" });
+      return res.status(400).json({
+        error: "No active price found for this product_id",
+      });
     }
-    // Use the first price (or add logic to select the right one)
+
     const priceId = prices.data[0].id;
 
     // 2. Create Stripe customer
@@ -332,12 +335,12 @@ router.post("/register", async (req, res) => {
       payment_behavior: "default_incomplete",
     });
 
-    // 3. Save IDs in the key object
+    // 4. Generate license key
     const licenseKey = generateFreeTrialKey();
     const keyObj = {
       key: licenseKey,
       product_id,
-      registeredDevice: null,
+      // registeredDevice: deviceId,
       lastReset: new Date(),
       aiUsage: 0,
       licenseStatus: "trialing",
@@ -345,14 +348,22 @@ router.post("/register", async (req, res) => {
       stripeCustomerId: customer.id,
     };
 
+    // 5. Save or update user
     let user = await User.findOne({ email: email.toLowerCase() });
     if (!user) {
       user = new User({
         email: email.toLowerCase(),
+        firstName,
+        lastName,
+        // deviceId,
         keys: [keyObj],
       });
     } else {
       user.keys.push(keyObj);
+
+      // Optionally update user's name/deviceId if not already stored
+      user.firstName = user.firstName || firstName;
+      user.lastName = user.lastName || lastName;
     }
 
     await user.save();
@@ -365,9 +376,10 @@ router.post("/register", async (req, res) => {
     });
   } catch (error) {
     console.error("Free trial registration error:", error);
-    res
-      .status(500)
-      .json({ error: "Error registering free trial", details: error.message });
+    res.status(500).json({
+      error: "Error registering free trial",
+      details: error.message,
+    });
   }
 });
 
@@ -604,43 +616,71 @@ router.post("/analyze-podcast", async (req, res) => {
 // List all products with their prices
 router.post("/create-paid-checkout-session", async (req, res) => {
   try {
-    const { email, product_id } = req.body;
+    const {
+      email,
+      product_id,
+
+      quantity = 1, // Default to 1 if not provided
+    } = req.body;
+
+    // Validate required fields
     if (!email || !product_id) {
-      return res
-        .status(400)
-        .json({ error: "Email and product_id are required" });
+      return res.status(400).json({
+        error: "email, product_id, are required",
+      });
     }
 
-    // 1. Find the first active price for the product
+    // 1. Get the price for the product
     const prices = await stripe.prices.list({
       product: product_id,
       active: true,
     });
+
     if (!prices.data.length) {
-      return res
-        .status(400)
-        .json({ error: "No active price found for this product_id" });
+      return res.status(400).json({
+        error: "No active price found for this product_id",
+      });
     }
+
     const priceId = prices.data[0].id;
 
     // 2. Create Stripe customer
-    const customer = await stripe.customers.create({ email });
+    const customer = await stripe.customers.create({
+      email,
+      metadata: {
+        source: "paid_form",
+      },
+    });
 
-    // 3. Create Stripe Checkout Session
+    // 3. Create Checkout session
     const session = await stripe.checkout.sessions.create({
       customer: customer.id,
       payment_method_types: ["card"],
-      line_items: [{ price: priceId, quantity: 1 }],
+      line_items: [
+        {
+          price: priceId,
+          quantity,
+        },
+      ],
       mode: "subscription",
-      success_url:
-        "https://yourdomain.com/success?session_id={CHECKOUT_SESSION_ID}",
-      cancel_url: "https://yourdomain.com/cancel",
+      success_url: "https://clinquant-naiad-5a8fed.netlify.app/test.html",
+      cancel_url: "https://clinquant-naiad-5a8fed.netlify.app/test.html",
+      metadata: {
+        email,
+
+        product_id,
+        quantity,
+      },
     });
 
-    res.json({ url: session.url });
+    res.status(200).json({ url: session.url });
   } catch (error) {
     console.error("Checkout session error:", error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({
+      error: "Error creating checkout session",
+      details: error.message,
+    });
   }
 });
+
 module.exports = router;
