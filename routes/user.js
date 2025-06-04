@@ -4,6 +4,7 @@ const User = require("../models/User");
 const axios = require("axios");
 const crypto = require("crypto");
 const Stripe = require("stripe");
+const { url } = require("inspector");
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 // Add this function at the top of the file after the imports
 async function resetFreeUserUsage() {
@@ -613,24 +614,23 @@ router.post("/analyze-podcast", async (req, res) => {
   }
 });
 
-// List all products with their prices
+function generateUniqueLicenseKey() {
+  return Array(5)
+    .fill(0)
+    .map(() => crypto.randomBytes(4).toString("hex").toUpperCase())
+    .join("-");
+}
+
 router.post("/create-paid-checkout-session", async (req, res) => {
   try {
-    const {
-      email,
-      product_id,
+    const { email, product_id, quantity = 1 } = req.body;
 
-      quantity = 1, // Default to 1 if not provided
-    } = req.body;
-
-    // Validate required fields
     if (!email || !product_id) {
       return res.status(400).json({
-        error: "email, product_id, are required",
+        error: "email and product_id are required",
       });
     }
 
-    // 1. Get the price for the product
     const prices = await stripe.prices.list({
       product: product_id,
       active: true,
@@ -644,7 +644,6 @@ router.post("/create-paid-checkout-session", async (req, res) => {
 
     const priceId = prices.data[0].id;
 
-    // 2. Create Stripe customer
     const customer = await stripe.customers.create({
       email,
       metadata: {
@@ -652,7 +651,6 @@ router.post("/create-paid-checkout-session", async (req, res) => {
       },
     });
 
-    // 3. Create Checkout session
     const session = await stripe.checkout.sessions.create({
       customer: customer.id,
       payment_method_types: ["card"],
@@ -663,24 +661,90 @@ router.post("/create-paid-checkout-session", async (req, res) => {
         },
       ],
       mode: "subscription",
-      success_url: "https://clinquant-naiad-5a8fed.netlify.app/test.html",
+      success_url: `http://127.0.0.1:5500/test/paymentSuccess.html?stripeCustomerId=${customer.id}&product_id=${product_id}&quantity=${quantity}`,
       cancel_url: "https://clinquant-naiad-5a8fed.netlify.app/test.html",
       metadata: {
         email,
-
         product_id,
         quantity,
       },
     });
 
-    res.status(200).json({ url: session.url });
+    // Generate license keys
+    const licenseKeys = [];
+    for (let i = 0; i < quantity; i++) {
+      licenseKeys.push(generateUniqueLicenseKey());
+    }
+
+    // Save or update user in database
+    let user = await User.findOne({ email: email.toLowerCase() });
+    if (!user) {
+      user = new User({ email: email.toLowerCase(), keys: [] });
+    }
+
+    licenseKeys.forEach((key) => {
+      user.keys.push({
+        key,
+        variant_id: "pro",
+        product_id,
+        licenseStatus: "incomplete", // Will be updated by webhook later
+        stripeCustomerId: customer.id,
+        stripeSubscriptionId: null, // Will be updated via webhook
+      });
+    });
+
+    await user.save();
+
+    return res.status(201).json({
+      message: "Checkout session created successfully",
+      url: session.url,
+      licenseKeys,
+      plan: "pro",
+    });
   } catch (error) {
     console.error("Checkout session error:", error);
-    res.status(500).json({
+    return res.status(500).json({
       error: "Error creating checkout session",
       details: error.message,
     });
   }
 });
 
+router.get("/user-get/:customerId", async (req, res) => {
+  try {
+    const { customerId } = req.params;
+
+    if (!customerId) {
+      return res.status(400).json({ error: "Customer ID is required" });
+    }
+
+    // Retrieve the Stripe customer to validate the ID (optional, but good practice)
+    const stripeCustomer = await stripe.customers.retrieve(customerId);
+    if (!stripeCustomer || stripeCustomer.deleted) {
+      return res.status(404).json({ error: "Stripe customer not found" });
+    }
+
+    // Find the user in your database
+    const user = await User.findOne({
+      "keys.stripeCustomerId": customerId,
+    });
+
+    if (!user) {
+      return res
+        .status(404)
+        .json({ error: "User not found for this customer ID" });
+    }
+
+    return res.status(200).json({
+      message: "User found",
+      user,
+    });
+  } catch (error) {
+    console.error("Error fetching user by Stripe customer ID:", error);
+    return res.status(500).json({
+      error: "Server error fetching user",
+      details: error.message,
+    });
+  }
+});
 module.exports = router;
