@@ -9,6 +9,10 @@ const keySchema = new mongoose.Schema({
     type: String,
     required: true,
   },
+  variant_id: {
+    type: String,
+    required: true,
+  },
   registeredDevice: {
     type: String,
     default: null,

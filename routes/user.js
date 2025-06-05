@@ -345,6 +345,7 @@ router.post("/register", async (req, res) => {
       lastReset: new Date(),
       aiUsage: 0,
       licenseStatus: "trialing",
+      variant_id: "free",
       stripeSubscriptionId: subscription.id,
       stripeCustomerId: customer.id,
     };
