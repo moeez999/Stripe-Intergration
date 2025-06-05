@@ -32,10 +32,7 @@ router.post("/webhook", async (req, res) => {
       return res.json({ received: true });
     }
 
-    if (
-      event.type === "customer.subscription.created" ||
-      event.type === "customer.subscription.updated"
-    ) {
+    if (event.type === "customer.subscription.created") {
       const subscriptionId = subscription.id;
       const status = subscription.status;
 
