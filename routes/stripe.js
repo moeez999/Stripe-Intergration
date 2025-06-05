@@ -14,33 +14,41 @@ router.post("/webhook", async (req, res) => {
   try {
     event = stripeClient.webhooks.constructEvent(req.body, sig, endpointSecret);
   } catch (err) {
-    console.error("Webhook Error:", err.message);
+    console.error("⚠️ Webhook signature verification failed:", err.message);
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
-  const subscription = event.data.object;
-  const customerId = subscription.customer;
+  // Send response to Stripe immediately
+  res.status(200).json({ received: true });
 
-  try {
-    const customer = await stripeClient.customers.retrieve(customerId);
-    const email = customer.email.toLowerCase();
+  // Continue processing in the background
+  process.nextTick(async () => {
+    const subscription = event.data.object;
+    const customerId = subscription.customer;
 
-    let user = await User.findOne({ email });
+    try {
+      const customer = await stripeClient.customers.retrieve(customerId);
+      const email = customer.email?.toLowerCase();
 
-    if (!user) {
-      console.log(`No user found for email: ${email}`);
-      return res.json({ received: true });
-    }
+      if (!email) {
+        console.warn("Customer email not found");
+        return;
+      }
 
-    if (event.type === "customer.subscription.created") {
+      const user = await User.findOne({ email });
+
+      if (!user) {
+        console.warn(`No user found for email: ${email}`);
+        return;
+      }
+
       const subscriptionId = subscription.id;
       const status = subscription.status;
 
-      // Immediately acknowledge receipt
-      res.status(200).json({ received: true });
-
-      // Continue processing asynchronously
-      process.nextTick(async () => {
+      if (
+        event.type === "customer.subscription.created" ||
+        event.type === "customer.subscription.updated"
+      ) {
         user.keys.forEach((key) => {
           if (key.stripeCustomerId === customerId) {
             key.stripeSubscriptionId =
@@ -48,54 +56,21 @@ router.post("/webhook", async (req, res) => {
             key.licenseStatus = status;
           }
         });
-
         await user.save();
-      });
-    } else if (event.type === "customer.subscription.updated") {
-      const subscriptionId = subscription.id;
-      const status = subscription.status;
-
-      // Immediately acknowledge receipt
-      res.status(200).json({ received: true });
-
-      // Continue processing asynchronously
-      process.nextTick(async () => {
-        user.keys.forEach((key) => {
-          if (key.stripeCustomerId === customerId) {
-            key.stripeSubscriptionId =
-              key.stripeSubscriptionId || subscriptionId;
-            key.licenseStatus = status;
-          }
-        });
-
-        await user.save();
-      });
-    } else if (event.type === "customer.subscription.deleted") {
-      const subscriptionId = subscription.id;
-
-      // Immediately acknowledge receipt
-      res.status(200).json({ received: true });
-
-      // Continue processing asynchronously
-      process.nextTick(async () => {
+      } else if (event.type === "customer.subscription.deleted") {
         user.keys.forEach((key) => {
           if (key.stripeSubscriptionId === subscriptionId) {
-            key.licenseStatus = "canceled"; // or use `subscription.status`
+            key.licenseStatus = "canceled";
           }
         });
-
         await user.save();
-      });
-    } else {
-      console.log("Unhandled event type:", event.type);
-      return res.status(400).json({ error: "Unhandled event type" });
+      } else {
+        console.log("Unhandled event type:", event.type);
+      }
+    } catch (err) {
+      console.error("Error processing webhook in background:", err);
     }
-
-    res.json({ received: true });
-  } catch (err) {
-    console.error("Webhook handling error:", err);
-    res.status(500).send("Webhook processing failed");
-  }
+  });
 });
 
 module.exports = router;
