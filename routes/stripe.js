@@ -39,25 +39,59 @@ router.post("/webhook", async (req, res) => {
       const subscriptionId = subscription.id;
       const status = subscription.status;
 
-      // Update license keys
-      user.keys.forEach((key) => {
-        if (key.stripeCustomerId === customerId && !key.stripeSubscriptionId) {
-          key.stripeSubscriptionId = subscriptionId;
-          key.licenseStatus = status;
-        }
-      });
+      // Immediately acknowledge receipt
+      res.status(200).json({ received: true });
 
-      await user.save();
+      // Continue processing asynchronously
+      process.nextTick(async () => {
+        user.keys.forEach((key) => {
+          if (key.stripeCustomerId === customerId) {
+            key.stripeSubscriptionId =
+              key.stripeSubscriptionId || subscriptionId;
+            key.licenseStatus = status;
+          }
+        });
+
+        await user.save();
+      });
+    } else if (event.type === "customer.subscription.updated") {
+      const subscriptionId = subscription.id;
+      const status = subscription.status;
+
+      // Immediately acknowledge receipt
+      res.status(200).json({ received: true });
+
+      // Continue processing asynchronously
+      process.nextTick(async () => {
+        user.keys.forEach((key) => {
+          if (key.stripeCustomerId === customerId) {
+            key.stripeSubscriptionId =
+              key.stripeSubscriptionId || subscriptionId;
+            key.licenseStatus = status;
+          }
+        });
+
+        await user.save();
+      });
     } else if (event.type === "customer.subscription.deleted") {
       const subscriptionId = subscription.id;
 
-      // Remove license keys related to this subscription
-      user.keys = user.keys.filter(
-        (key) => key.stripeSubscriptionId !== subscriptionId
-      );
-      await user.save();
+      // Immediately acknowledge receipt
+      res.status(200).json({ received: true });
+
+      // Continue processing asynchronously
+      process.nextTick(async () => {
+        user.keys.forEach((key) => {
+          if (key.stripeSubscriptionId === subscriptionId) {
+            key.licenseStatus = "canceled"; // or use `subscription.status`
+          }
+        });
+
+        await user.save();
+      });
     } else {
       console.log("Unhandled event type:", event.type);
+      return res.status(400).json({ error: "Unhandled event type" });
     }
 
     res.json({ received: true });
