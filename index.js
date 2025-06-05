@@ -19,10 +19,10 @@ const app = express();
 
 // Middleware
 const corsOptions = {
-  origin: "https://clinquant-naiad-5a8fed.netlify.app/", // allow your frontend domain
+  origin: "*",
   methods: ["GET", "POST", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"], // add more headers if needed
-  credentials: true, // if you're using cookies or auth headers
+  allowedHeaders: ["Content-Type", "Authorization"],
+  credentials: false,
 };
 
 app.use(cors(corsOptions));
