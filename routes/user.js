@@ -1,39 +1,42 @@
-const express = require('express');
+const express = require("express");
 const router = express.Router();
-const User = require('../models/User');
-const axios = require('axios');
-const crypto = require('crypto');
-const Stripe = require('stripe');
-const { generateFreeTrialKey, generateUniqueLicenseKey } = require('../utils/licenseGenerator');
+const User = require("../models/User");
+const axios = require("axios");
+const crypto = require("crypto");
+const Stripe = require("stripe");
+const {
+  generateFreeTrialKey,
+  generateUniqueLicenseKey,
+} = require("../utils/licenseGenerator");
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 // Add this function at the top of the file after the imports
 async function resetFreeUserUsage() {
-    try {
-        // Find all users with free keys
-        const users = await User.find({ 'keys.variant_id': 'free' });
-        const oneMinuteAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000); // 30 days ago
-        let resetCount = 0;
+  try {
+    // Find all users with free keys
+    const users = await User.find({ "keys.variant_id": "free" });
+    const oneMinuteAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000); // 30 days ago
+    let resetCount = 0;
 
-        for (const user of users) {
-            // Check each free key in the user's keys array
-            user.keys.forEach(key => {
-                if (key.variant_id === 'free' && key.lastReset < oneMinuteAgo) {
-                    key.usage = 0;
-                    key.lastReset = new Date();
-                    resetCount++;
-                }
-            });
-
-            // Only save if we made changes to this user's keys
-            if (user.isModified()) {
-                await user.save();
-            }
+    for (const user of users) {
+      // Check each free key in the user's keys array
+      user.keys.forEach((key) => {
+        if (key.variant_id === "free" && key.lastReset < oneMinuteAgo) {
+          key.usage = 0;
+          key.lastReset = new Date();
+          resetCount++;
         }
+      });
 
-        console.log(`Reset usage for ${resetCount} free keys`);
-    } catch (error) {
-        console.error('Error resetting free user usage:', error);
+      // Only save if we made changes to this user's keys
+      if (user.isModified()) {
+        await user.save();
+      }
     }
+
+    console.log(`Reset usage for ${resetCount} free keys`);
+  } catch (error) {
+    console.error("Error resetting free user usage:", error);
+  }
 }
 
 // Set up the interval to run every 24 hours
@@ -290,15 +293,14 @@ resetFreeUserUsage();
 //     }
 // });
 
-
-router.post('/register', async (req, res) => {
+router.post("/register", async (req, res) => {
   try {
     const { email, product_id, firstName, lastName } = req.body;
 
     // Validate required fields
     if (!email || !product_id || !firstName || !lastName) {
       return res.status(400).json({
-        error: 'firstName, lastName, email and product_id are required',
+        error: "firstName, lastName, email and product_id are required",
       });
     }
 
@@ -310,7 +312,7 @@ router.post('/register', async (req, res) => {
 
     if (!prices.data.length) {
       return res.status(400).json({
-        error: 'No active price found for this product_id',
+        error: "No active price found for this product_id",
       });
     }
 
@@ -323,7 +325,7 @@ router.post('/register', async (req, res) => {
     const subscription = await stripe.subscriptions.create({
       customer: customer.id,
       items: [{ price: priceId }],
-      payment_behavior: 'default_incomplete',
+      payment_behavior: "default_incomplete",
     });
 
     // 4. Generate license key
@@ -334,8 +336,8 @@ router.post('/register', async (req, res) => {
       // registeredDevice: deviceId,
       lastReset: new Date(),
       aiUsage: 0,
-      licenseStatus: 'trialing',
-      variant_id: 'free',
+      licenseStatus: "trialing",
+      variant_id: "free",
       stripeSubscriptionId: subscription.id,
       stripeCustomerId: customer.id,
     };
@@ -361,240 +363,256 @@ router.post('/register', async (req, res) => {
     await user.save();
 
     res.status(201).json({
-      message: 'Free trial registered and Stripe subscription created',
+      message: "Free trial registered and Stripe subscription created",
       licenseKey,
       stripeCustomerId: customer.id,
       stripeSubscriptionId: subscription.id,
     });
   } catch (error) {
-    console.error('Free trial registration error:', error);
+    console.error("Free trial registration error:", error);
     res.status(500).json({
-      error: 'Error registering free trial',
+      error: "Error registering free trial",
       details: error.message,
     });
   }
 });
 
-router.post('/track-usage', async (req, res) => {
-    try {
-        const { licenseKey, silences, speakerchanges } = req.body;
-        
-        // Validate inputs
-        if (!licenseKey || typeof silences !== 'number' || typeof speakerchanges !== 'number') {
-            return res.status(400).json({
-                success: false,
-                message: 'Invalid input parameters'
-            });
-        }
+router.post("/track-usage", async (req, res) => {
+  try {
+    const { licenseKey, silences, speakerchanges } = req.body;
 
-        // Find user with this license key
-        const user = await User.findOne({ 'keys.key': licenseKey });
-        
-        if (!user) {
-            return res.status(404).json({
-                success: false,
-                message: 'License key not found'
-            });
-        }
-
-        // Find the specific key in the user's keys array
-        const keyEntry = user.keys.find(k => k.key === licenseKey);
-        
-        // Calculate weighted usage
-        const weightedSilences = silences * process.env.SILENCE_WEIGHT;  // Each silence removal costs 1
-        const weightedSpeakerChanges = Math.round(speakerchanges * process.env.SPEAKER_CHANGE_WEIGHT);  // Each speaker change costs 0.5
-        const newUsage = keyEntry.usage + weightedSilences + weightedSpeakerChanges;
-        const usageLimit = parseInt(process.env.USAGE_LIMIT);
-
-        // Check if the key is for a pro plan
-        if (keyEntry.variant_id !== 'free') {
-            // For pro users, track usage but don't enforce limits
-            keyEntry.usage = newUsage;
-            await user.save();
-            
-            return res.json({
-                success: true,
-                message: 'Pro plan - no usage limits',
-                currentUsage: newUsage,
-                limit: null,
-                isPro: true
-            });
-        }
-        
-        // For free plans, check usage limit
-        if (newUsage >= usageLimit) {
-            return res.json({
-                success: false,
-                message: 'Usage limit reached',
-                currentUsage: keyEntry.usage,
-                newUsage: newUsage,  // Include the potential new usage
-                limit: usageLimit,
-                isPro: false
-            });
-        }
-
-        // Only update usage if under the limit
-        keyEntry.usage = newUsage;
-        await user.save();
-
-        return res.json({
-            success: true,
-            message: 'Usage updated successfully',
-            currentUsage: newUsage,
-            limit: usageLimit,
-            isPro: false
-        });
-
-    } catch (error) {
-        console.error('Usage tracking error:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Error tracking usage',
-            error: error.message
-        });
+    // Validate inputs
+    if (
+      !licenseKey ||
+      typeof silences !== "number" ||
+      typeof speakerchanges !== "number"
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid input parameters",
+      });
     }
+
+    // Find user with this license key
+    const user = await User.findOne({ "keys.key": licenseKey });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "License key not found",
+      });
+    }
+
+    // Find the specific key in the user's keys array
+    const keyEntry = user.keys.find((k) => k.key === licenseKey);
+
+    // Calculate weighted usage
+    const weightedSilences = silences * process.env.SILENCE_WEIGHT; // Each silence removal costs 1
+    const weightedSpeakerChanges = Math.round(
+      speakerchanges * process.env.SPEAKER_CHANGE_WEIGHT
+    ); // Each speaker change costs 0.5
+    const newUsage = keyEntry.usage + weightedSilences + weightedSpeakerChanges;
+    const usageLimit = parseInt(process.env.USAGE_LIMIT);
+
+    // Check if the key is for a pro plan
+    if (keyEntry.variant_id !== "free") {
+      // For pro users, track usage but don't enforce limits
+      keyEntry.usage = newUsage;
+      await user.save();
+
+      return res.json({
+        success: true,
+        message: "Pro plan - no usage limits",
+        currentUsage: newUsage,
+        limit: null,
+        isPro: true,
+      });
+    }
+
+    // For free plans, check usage limit
+    if (newUsage >= usageLimit) {
+      return res.json({
+        success: false,
+        message: "Usage limit reached",
+        currentUsage: keyEntry.usage,
+        newUsage: newUsage, // Include the potential new usage
+        limit: usageLimit,
+        isPro: false,
+      });
+    }
+
+    // Only update usage if under the limit
+    keyEntry.usage = newUsage;
+    await user.save();
+
+    return res.json({
+      success: true,
+      message: "Usage updated successfully",
+      currentUsage: newUsage,
+      limit: usageLimit,
+      isPro: false,
+    });
+  } catch (error) {
+    console.error("Usage tracking error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error tracking usage",
+      error: error.message,
+    });
+  }
 });
 
-router.post('/analyze-podcast', async (req, res) => {
-    try {
-        const { audioData, thresholdDb, minDuration, credentials } = req.body;
-        
-        // First find the user and validate their license
-        const user = await User.findOne({ 'keys.key': credentials.licenseKey });
-        
-        if (!user) {
-            return res.status(404).json({
-                success: false,
-                error: 'License key not found'
-            });
-        }
+router.post("/analyze-podcast", async (req, res) => {
+  try {
+    const { audioData, thresholdDb, minDuration, credentials } = req.body;
 
-        // Find the specific key in the user's keys array
-        const keyEntry = user.keys.find(k => k.key === credentials.licenseKey);
-        
-        // Perform the audio analysis
-        const amplitudeToDb = (amplitude) => {
-            const float32 = amplitude / 32767;
-            return 20 * Math.log10(Math.max(Math.abs(float32), 1e-8));
-        };
+    // First find the user and validate their license
+    const user = await User.findOne({ "keys.key": credentials.licenseKey });
 
-        let lastSpeakerIndex = null;
-        let lastSpeakerTime = 0;
-        const speakerChanges = [];
-
-        // Analyze in chunks
-        const chunkSize = 100;
-        const totalChunks = Math.ceil(audioData[0].amplitudes.length / chunkSize);
-
-        for (let chunk = 0; chunk < totalChunks; chunk++) {
-            const startSample = chunk * chunkSize;
-            const endSample = Math.min((chunk + 1) * chunkSize, audioData[0].amplitudes.length);
-
-            for (let i = startSample; i < endSample; i++) {
-                const currentTime = i / audioData[0].sampleRate;
-                if (currentTime - lastSpeakerTime < minDuration) continue;
-
-                let maxDb = -100;
-                let loudestSpeakerIndex = -1;
-
-                audioData.forEach((audio, index) => {
-                    const amplitude = Math.abs(audio.amplitudes[i] || 0);
-                    const db = amplitudeToDb(amplitude);
-                    if (db > maxDb && db > thresholdDb) {
-                        maxDb = db;
-                        loudestSpeakerIndex = index;
-                    }
-                });
-
-                if (loudestSpeakerIndex !== -1 && loudestSpeakerIndex !== lastSpeakerIndex) {
-                    if (lastSpeakerIndex !== null) {
-                        speakerChanges.push({
-                            trackNumber: parseInt(audioData[lastSpeakerIndex].info.videoTrack.replace('V', '')),
-                            inPoint: lastSpeakerTime,
-                            outPoint: currentTime,
-                            nextTrack: parseInt(audioData[loudestSpeakerIndex].info.videoTrack.replace('V', '')),
-                            nextTrackInPoint: currentTime
-                        });
-                    }
-                    lastSpeakerIndex = loudestSpeakerIndex;
-                    lastSpeakerTime = currentTime;
-                }
-            }
-        }
-
-        // Now check usage limits before returning the results
-        const speakerChangesCount = speakerChanges.length;
-        console.log('Speaker changes count:', speakerChangesCount);
-        const weightedSpeakerChanges = Math.round(speakerChangesCount * process.env.SPEAKER_CHANGE_WEIGHT); 
-        const newUsage = keyEntry.usage + weightedSpeakerChanges;
-        const usageLimit = parseInt(process.env.USAGE_LIMIT);
-
-        // For pro users, just track usage without limits
-        if (keyEntry.variant_id !== 'free') {
-            keyEntry.usage = newUsage;
-            await user.save();
-            
-            return res.json({
-                success: true,
-                speakerChanges,
-                usage: {
-                    success: true,
-                    message: 'Pro plan - no usage limits',
-                    currentUsage: newUsage,
-                    limit: null,
-                    isPro: true
-                }
-            });
-        }
-        
-        // For free plans, check usage limit
-        if (newUsage >= usageLimit) {
-            return res.json({
-                success: false,
-                error: 'Usage limit reached',
-                usage: {
-                    success: false,
-                    message: 'Usage limit reached',
-                    currentUsage: keyEntry.usage,
-                    newUsage: newUsage,
-                    limit: usageLimit,
-                    isPro: false
-                }
-            });
-        }
-
-        // Update usage for free plan users
-        keyEntry.usage = newUsage;
-        await user.save();
-
-        return res.json({
-            success: true,
-            speakerChanges,
-            usage: {
-                success: true,
-                message: 'Usage updated successfully',
-                currentUsage: newUsage,
-                limit: usageLimit,
-                isPro: false
-            }
-        });
-
-    } catch (error) {
-        console.error('Error analyzing podcast audio:', error);
-        res.status(500).json({
-            success: false,
-            error: error.message
-        });
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: "License key not found",
+      });
     }
+
+    // Find the specific key in the user's keys array
+    const keyEntry = user.keys.find((k) => k.key === credentials.licenseKey);
+
+    // Perform the audio analysis
+    const amplitudeToDb = (amplitude) => {
+      const float32 = amplitude / 32767;
+      return 20 * Math.log10(Math.max(Math.abs(float32), 1e-8));
+    };
+
+    let lastSpeakerIndex = null;
+    let lastSpeakerTime = 0;
+    const speakerChanges = [];
+
+    // Analyze in chunks
+    const chunkSize = 100;
+    const totalChunks = Math.ceil(audioData[0].amplitudes.length / chunkSize);
+
+    for (let chunk = 0; chunk < totalChunks; chunk++) {
+      const startSample = chunk * chunkSize;
+      const endSample = Math.min(
+        (chunk + 1) * chunkSize,
+        audioData[0].amplitudes.length
+      );
+
+      for (let i = startSample; i < endSample; i++) {
+        const currentTime = i / audioData[0].sampleRate;
+        if (currentTime - lastSpeakerTime < minDuration) continue;
+
+        let maxDb = -100;
+        let loudestSpeakerIndex = -1;
+
+        audioData.forEach((audio, index) => {
+          const amplitude = Math.abs(audio.amplitudes[i] || 0);
+          const db = amplitudeToDb(amplitude);
+          if (db > maxDb && db > thresholdDb) {
+            maxDb = db;
+            loudestSpeakerIndex = index;
+          }
+        });
+
+        if (
+          loudestSpeakerIndex !== -1 &&
+          loudestSpeakerIndex !== lastSpeakerIndex
+        ) {
+          if (lastSpeakerIndex !== null) {
+            speakerChanges.push({
+              trackNumber: parseInt(
+                audioData[lastSpeakerIndex].info.videoTrack.replace("V", "")
+              ),
+              inPoint: lastSpeakerTime,
+              outPoint: currentTime,
+              nextTrack: parseInt(
+                audioData[loudestSpeakerIndex].info.videoTrack.replace("V", "")
+              ),
+              nextTrackInPoint: currentTime,
+            });
+          }
+          lastSpeakerIndex = loudestSpeakerIndex;
+          lastSpeakerTime = currentTime;
+        }
+      }
+    }
+
+    // Now check usage limits before returning the results
+    const speakerChangesCount = speakerChanges.length;
+    console.log("Speaker changes count:", speakerChangesCount);
+    const weightedSpeakerChanges = Math.round(
+      speakerChangesCount * process.env.SPEAKER_CHANGE_WEIGHT
+    );
+    const newUsage = keyEntry.usage + weightedSpeakerChanges;
+    const usageLimit = parseInt(process.env.USAGE_LIMIT);
+
+    // For pro users, just track usage without limits
+    if (keyEntry.variant_id !== "free") {
+      keyEntry.usage = newUsage;
+      await user.save();
+
+      return res.json({
+        success: true,
+        speakerChanges,
+        usage: {
+          success: true,
+          message: "Pro plan - no usage limits",
+          currentUsage: newUsage,
+          limit: null,
+          isPro: true,
+        },
+      });
+    }
+
+    // For free plans, check usage limit
+    if (newUsage >= usageLimit) {
+      return res.json({
+        success: false,
+        error: "Usage limit reached",
+        usage: {
+          success: false,
+          message: "Usage limit reached",
+          currentUsage: keyEntry.usage,
+          newUsage: newUsage,
+          limit: usageLimit,
+          isPro: false,
+        },
+      });
+    }
+
+    // Update usage for free plan users
+    keyEntry.usage = newUsage;
+    await user.save();
+
+    return res.json({
+      success: true,
+      speakerChanges,
+      usage: {
+        success: true,
+        message: "Usage updated successfully",
+        currentUsage: newUsage,
+        limit: usageLimit,
+        isPro: false,
+      },
+    });
+  } catch (error) {
+    console.error("Error analyzing podcast audio:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
 });
 
-router.post('/create-paid-checkout-session', async (req, res) => {
+router.post("/create-paid-checkout-session", async (req, res) => {
   try {
     const { email, product_id, quantity = 1 } = req.body;
 
     if (!email || !product_id) {
       return res.status(400).json({
-        error: 'email and product_id are required',
+        error: "email and product_id are required",
       });
     }
 
@@ -605,7 +623,7 @@ router.post('/create-paid-checkout-session', async (req, res) => {
 
     if (!prices.data.length) {
       return res.status(400).json({
-        error: 'No active price found for this product_id',
+        error: "No active price found for this product_id",
       });
     }
 
@@ -614,22 +632,22 @@ router.post('/create-paid-checkout-session', async (req, res) => {
     const customer = await stripe.customers.create({
       email,
       metadata: {
-        source: 'paid_form',
+        source: "paid_form",
       },
     });
 
     const session = await stripe.checkout.sessions.create({
       customer: customer.id,
-      payment_method_types: ['card'],
+      payment_method_types: ["card"],
       line_items: [
         {
           price: priceId,
           quantity,
         },
       ],
-      mode: 'subscription',
+      mode: "subscription",
       success_url: `https://clinquant-naiad-5a8fed.netlify.app/paymentSuccess.html?stripeCustomerId=${customer.id}&product_id=${product_id}&quantity=${quantity}`,
-      cancel_url: 'https://clinquant-naiad-5a8fed.netlify.app/test.html',
+      cancel_url: "https://clinquant-naiad-5a8fed.netlify.app/test.html",
       metadata: {
         email,
         product_id,
@@ -640,7 +658,8 @@ router.post('/create-paid-checkout-session', async (req, res) => {
     // Generate license keys
     const licenseKeys = [];
     for (let i = 0; i < quantity; i++) {
-      licenseKeys.push(generateUniqueLicenseKey());
+      const key = await generateUniqueLicenseKey();
+      licenseKeys.push(key);
     }
 
     // Save or update user in database
@@ -652,9 +671,9 @@ router.post('/create-paid-checkout-session', async (req, res) => {
     licenseKeys.forEach((key) => {
       user.keys.push({
         key,
-        variant_id: 'pro',
+        variant_id: "pro",
         product_id,
-        licenseStatus: 'incomplete', // Will be updated by webhook later
+        licenseStatus: "unpaid", // Will be updated by webhook later
         stripeCustomerId: customer.id,
         stripeSubscriptionId: null, // Will be updated via webhook
       });
@@ -663,55 +682,55 @@ router.post('/create-paid-checkout-session', async (req, res) => {
     await user.save();
 
     return res.status(201).json({
-      message: 'Checkout session created successfully',
+      message: "Checkout session created successfully",
       url: session.url,
       licenseKeys,
-      plan: 'pro',
+      plan: "pro",
     });
   } catch (error) {
-    console.error('Checkout session error:', error);
+    console.error("Checkout session error:", error);
     return res.status(500).json({
-      error: 'Error creating checkout session',
+      error: "Error creating checkout session",
       details: error.message,
     });
   }
 });
 
-router.get('/user-get/:customerId', async (req, res) => {
+router.get("/user-get/:customerId", async (req, res) => {
   try {
     const { customerId } = req.params;
 
     if (!customerId) {
-      return res.status(400).json({ error: 'Customer ID is required' });
+      return res.status(400).json({ error: "Customer ID is required" });
     }
 
     // Retrieve the Stripe customer to validate the ID (optional, but good practice)
     const stripeCustomer = await stripe.customers.retrieve(customerId);
     if (!stripeCustomer || stripeCustomer.deleted) {
-      return res.status(404).json({ error: 'Stripe customer not found' });
+      return res.status(404).json({ error: "Stripe customer not found" });
     }
 
     // Find the user in your database
     const user = await User.findOne({
-      'keys.stripeCustomerId': customerId,
+      "keys.stripeCustomerId": customerId,
     });
 
     if (!user) {
       return res
         .status(404)
-        .json({ error: 'User not found for this customer ID' });
+        .json({ error: "User not found for this customer ID" });
     }
 
     return res.status(200).json({
-      message: 'User found',
+      message: "User found",
       user,
     });
   } catch (error) {
-    console.error('Error fetching user by Stripe customer ID:', error);
+    console.error("Error fetching user by Stripe customer ID:", error);
     return res.status(500).json({
-      error: 'Server error fetching user',
+      error: "Server error fetching user",
       details: error.message,
     });
   }
 });
-module.exports = router; 
+module.exports = router;
