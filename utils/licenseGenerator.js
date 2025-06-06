@@ -36,6 +36,16 @@ async function generateUniqueLicenseKey() {
     return licenseKey;
 }
 
+// Helper to generate a free trial key
+function generateFreeTrialKey() {
+  // Format: XXXXXXXX-XXXXXXXX-XXXXXXXX-XXXXXXXX-XXXXXXXX (hex)
+  return Array(5)
+    .fill(0)
+    .map(() => crypto.randomBytes(4).toString('hex').toUpperCase())
+    .join('-');
+}
+
 module.exports = {
-    generateUniqueLicenseKey
+    generateUniqueLicenseKey,
+    generateFreeTrialKey
 }; 

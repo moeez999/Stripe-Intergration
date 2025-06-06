@@ -1,74 +1,62 @@
-const mongoose = require("mongoose");
+const mongoose = require('mongoose');
 
 const keySchema = new mongoose.Schema({
   key: {
     type: String,
-    required: true,
+    required: true
   },
   product_id: {
     type: String,
-    required: true,
-  },
-  variant_id: {
-    type: String,
-    required: true,
+    required: true
   },
   registeredDevice: {
     type: String,
-    default: null,
+    default: null
   },
   lastReset: {
     type: Date,
-    default: Date.now,
+    default: Date.now
   },
   aiUsage: {
     type: Number,
-    default: 0, // Track AI tokens/minutes/whatever you define
+    default: 0 // Track AI tokens/minutes/whatever you define
   },
   licenseStatus: {
     type: String,
-    enum: [
-      "active",
-      "past_due",
-      "canceled",
-      "incomplete",
-      "incomplete_expired",
-      "trialing",
-      "unpaid",
-    ], // Add all relevant Stripe statuses
-    default: "trialing", // Match Stripe subscription status
+    enum: ['active', 'trialing', 'past_due', 'canceled', 'unpaid', 'expired'],
+    default: 'trialing' // Match Stripe subscription status
   },
   stripeSubscriptionId: {
     type: String,
-    default: null,
+    default: null
   },
   stripeCustomerId: {
     type: String,
-    default: null,
-  },
+    default: null
+  }
 });
 
 const onboardingSchema = new mongoose.Schema({
   data: {
     type: Map,
     of: mongoose.Schema.Types.Mixed,
-    default: new Map(),
+    default: new Map()
   },
   submittedAt: {
     type: Date,
-    default: Date.now,
-  },
+    default: Date.now
+  }
 });
 
 const usageLogSchema = new mongoose.Schema({
   timestamp: {
     type: Date,
-    default: Date.now,
+    default: Date.now
   },
   feature: {
     type: String,
-    enum: ["silence", "podcast", "animated-subtitles"],
-  },
+    enum: ['silence', 'podcast', 'animated-subtitles']
+  }
 });
 
 const userSchema = new mongoose.Schema({
@@ -76,30 +64,30 @@ const userSchema = new mongoose.Schema({
     type: String,
     required: true,
     index: true,
-    lowercase: true,
+    lowercase: true
   },
   firstName: {
     type: String,
-    default: "",
+    default: ''
   },
   lastName: {
     type: String,
-    default: "",
+    default: ''
   },
   source: {
     type: String,
-    default: null,
+    default: null
   },
   keys: [keySchema],
   onboarding: {
     type: onboardingSchema,
-    default: () => ({}),
+    default: () => ({})
   },
   usageLogs: [usageLogSchema],
   createdAt: {
     type: Date,
-    default: Date.now,
-  },
+    default: Date.now
+  }
 });
 
-module.exports = mongoose.model("User", userSchema);
+module.exports = mongoose.model('User', userSchema); 

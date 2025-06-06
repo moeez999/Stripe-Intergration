@@ -1,20 +1,19 @@
-const express = require("express");
+const express = require('express');
 const router = express.Router();
-const stripe = require("stripe");
-const User = require("../models/User");
-const crypto = require("crypto");
-const endpointSecret = "whsec_KAe4b4qpkGsQYmnTJnP4GJpKJgA0Fh6s";
+const stripe = require('stripe');
+const User = require('../models/User');
+const endpointSecret = 'whsec_KAe4b4qpkGsQYmnTJnP4GJpKJgA0Fh6s';
 
 const stripeClient = stripe(process.env.STRIPE_SECRET_KEY);
 
-router.post("/webhook", async (req, res) => {
-  const sig = req.headers["stripe-signature"];
+router.post('/webhook', async (req, res) => {
+  const sig = req.headers['stripe-signature'];
   let event;
 
   try {
     event = stripeClient.webhooks.constructEvent(req.body, sig, endpointSecret);
   } catch (err) {
-    console.error("⚠️ Webhook signature verification failed:", err.message);
+    console.error('⚠️ Webhook signature verification failed:', err.message);
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
@@ -31,7 +30,7 @@ router.post("/webhook", async (req, res) => {
       const email = customer.email?.toLowerCase();
 
       if (!email) {
-        console.warn("Customer email not found");
+        console.warn('Customer email not found');
         return;
       }
 
@@ -46,8 +45,8 @@ router.post("/webhook", async (req, res) => {
       const status = subscription.status;
 
       if (
-        event.type === "customer.subscription.created" ||
-        event.type === "customer.subscription.updated"
+        event.type === 'customer.subscription.created' ||
+        event.type === 'customer.subscription.updated'
       ) {
         user.keys.forEach((key) => {
           if (key.stripeCustomerId === customerId) {
@@ -57,18 +56,18 @@ router.post("/webhook", async (req, res) => {
           }
         });
         await user.save();
-      } else if (event.type === "customer.subscription.deleted") {
+      } else if (event.type === 'customer.subscription.deleted') {
         user.keys.forEach((key) => {
           if (key.stripeSubscriptionId === subscriptionId) {
-            key.licenseStatus = "canceled";
+            key.licenseStatus = 'canceled';
           }
         });
         await user.save();
       } else {
-        console.log("Unhandled event type:", event.type);
+        console.log('Unhandled event type:', event.type);
       }
     } catch (err) {
-      console.error("Error processing webhook in background:", err);
+      console.error('Error processing webhook in background:', err);
     }
   });
 });
