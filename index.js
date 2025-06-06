@@ -18,6 +18,7 @@ dotenv.config();
 const app = express();
 
 // Middleware
+// Middleware
 const corsOptions = {
   origin: "*",
   methods: ["GET", "POST", "OPTIONS"],
@@ -26,7 +27,6 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-
 // Special handling for Stripe webhooks - must be before other body parsers
 app.use("/api/stripe/webhook", express.raw({ type: "application/json" }));
 
