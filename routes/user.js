@@ -646,8 +646,8 @@ router.post("/create-paid-checkout-session", async (req, res) => {
         },
       ],
       mode: "subscription",
-      success_url: `https://clinquant-naiad-5a8fed.netlify.app/paymentSuccess.html?stripeCustomerId=${customer.id}&product_id=${product_id}&quantity=${quantity}`,
-      cancel_url: "https://clinquant-naiad-5a8fed.netlify.app/test.html",
+      success_url: `https://www.cutpilot.io/pricing-copy?stripeCustomerId=${customer.id}&product_id=${product_id}&quantity=${quantity}`,
+      cancel_url: "https://www.cutpilot.io/pricing-copy/test.html",
       metadata: {
         email,
         product_id,
